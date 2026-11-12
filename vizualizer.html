@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STM32 I2C ↔ BME280: transaction step by step</title>
+<style>
+:root{--bg:#fafaf7;--fg:#1c1c1a;--mut:#6b6b66;--card:#fff;--bd:#d9d9d2;--hl:#fde68a;--on:#bbf7d0;--off:#fecaca}
+@media (prefers-color-scheme:dark){:root{--bg:#18181a;--fg:#ececea;--mut:#9a9a94;--card:#222225;--bd:#3a3a3e;--hl:#5a4a10;--on:#14532d;--off:#7f1d1d}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:1180px;padding:10px 12px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
+h1{font-size:19px;margin:0 0 2px}p{margin:4px 0}.mut{color:var(--mut)}
+code,.mono{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin:6px 0}
+button,select{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer}
+.tabs button.on{background:#2563eb;color:#fff;border-color:#2563eb}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}.ctl{display:flex;gap:6px;margin:6px 0;flex-wrap:wrap}
+.st{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.state{padding:2px 9px;border:1px solid var(--bd);border-radius:14px;font:12px ui-monospace,monospace;background:var(--card)}
+.state.on{background:var(--hl);border-color:var(--fg);font-weight:700}
+#wrap{overflow-x:auto;padding:4px}
+.lane{display:flex;align-items:center;padding:18px 10px 8px}
+.node{padding:6px 12px;border:2px solid var(--bd);border-radius:8px;text-align:center;font-weight:600;min-width:80px}
+.node.on{border-color:var(--fg);background:var(--hl)}
+.wire{flex:1;height:4px;background:var(--bd);position:relative;margin:0 8px}
+.packet{position:absolute;top:-13px;transform:translateX(-50%);padding:1px 9px;border-radius:12px;font:600 12px ui-monospace,monospace;color:#111;white-space:nowrap}
+.live{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:5px;margin:6px 0}
+.chip{border:1px solid var(--bd);border-radius:8px;padding:4px 8px;background:var(--card);font-size:11.5px;color:var(--mut)}
+.chip b{display:block;font:600 13.5px ui-monospace,monospace;color:var(--fg)}
+.chip.on{background:var(--hl);border-color:var(--fg)}.chip.ON{background:var(--on);border-color:var(--fg)}.chip.OFF{background:var(--off);border-color:var(--fg)}
+#strip{display:flex;gap:3px;overflow-x:auto;padding:2px 0 6px}
+.cell{flex:0 0 auto;min-width:50px;text-align:center;border-radius:6px;padding:4px;font-size:12px;border:2px solid transparent;cursor:pointer;color:#111}
+.cell.M{background:#bfdbfe}.cell.S{background:#fcd34d}.cell.sel{border-color:var(--fg)}
+.cell small{display:block;font-size:10px;opacity:.75}
+.legend span{display:inline-block;width:11px;height:11px;border-radius:3px;margin:0 4px 0 10px;vertical-align:middle}
+#bits{display:flex;gap:4px;margin:6px 0 2px;flex-wrap:wrap}
+.bit{width:34px;height:36px;border:1px solid var(--bd);border-radius:5px;text-align:center;font:600 15px/36px ui-monospace,monospace;color:#111}
+.bit.n{width:40px}.bit.M{background:#bfdbfe}.bit.S{background:#fcd34d}
+.row{display:grid;grid-template-columns:120px 1fr;gap:4px;margin:3px 0}.row b{color:var(--mut);font-weight:600;font-size:12.5px}
+.rg{display:inline-block;padding:0 7px;margin:1px;border:1px solid var(--bd);border-radius:5px;font:12px ui-monospace,monospace;color:var(--mut)}
+.rg.on{background:var(--hl);color:var(--fg);border-color:var(--fg);font-weight:700}
+.band{cursor:pointer}
+#note,#stretch{display:none;border-left:4px solid #ea580c;font-size:13px}
+#stretch{color:#ea580c;font-weight:600;margin:4px 0}
+summary{cursor:pointer}
+#fsm{width:100%;height:auto;color:var(--fg)}
+.fn{cursor:pointer}.fn rect{fill:var(--card);stroke:var(--bd);stroke-width:1.5}.fn.on rect{fill:var(--hl);stroke:var(--fg);stroke-width:2.5}
+.fn text{fill:currentColor;font:600 12px ui-monospace,Consolas,monospace}
+.fe{cursor:pointer}.fe path{fill:none;stroke:var(--mut);stroke-width:1.6;marker-end:url(#ar)}.fe.er path{stroke-dasharray:6 4}
+.fe.vis path{stroke:#2563eb;marker-end:url(#arB)}.fe.on path{stroke:#dc2626;stroke-width:3.2;marker-end:url(#arR)}
+.fe text{font:10.5px ui-monospace,Consolas,monospace;fill:currentColor;stroke:var(--card);stroke-width:3px;paint-order:stroke}
+#ar polygon{fill:var(--mut)}#arB polygon{fill:#2563eb}#arR polygon{fill:#dc2626}
+</style>
+</head>
+<body>
+<h1>STM32 I2C1 ↔ BME280: transaction step by step</h1>
+<p class="mut">Interrupt-driven master driver. Pick a scenario, click a segment of the waveform or press play.</p>
+
+<div class="tabs"><button id="tW" class="on">WRITE 0xF4 ← 0x27</button><button id="tR1">READ 1 byte (0xD0)</button><button id="tR2">READ 2 bytes</button><button id="tR3">READ 3 bytes</button><button id="tR5">READ 5 bytes</button></div>
+<div class="tabs" id="views"><button id="vW" class="on">Waveform view</button><button id="vF">State machine (FSM) view</button></div>
+<div class="card"><span class="mut">Driver state:</span> <span id="sm" class="st" style="display:inline-flex"></span></div>
+
+<div id="viewW">
+<details class="card"><summary><b>How to read the waveform</b></summary>
+<p><b>SCL</b> is the clock (grey), <b>SDA</b> the data (black). A bit is valid while SCL = 1; SDA changes only while SCL = 0, except for START (SDA falls while SCL = 1) and STOP (SDA rises while SCL = 1).</p>
+<p>A byte is 8 bits, MSB first, plus a 9th clock where the receiver pulls SDA low (ACK) or leaves it high (NACK). Both lines are open-drain with pull-ups.</p>
+<p><b style="color:#ea580c">Orange dashed</b> = clock stretching: the STM32 holds SCL low while ADDR or BTF is set, until the ISR has done its job.</p></details>
+
+<p class="legend mut" style="margin:2px 0"><span style="background:#bfdbfe"></span>STM32 (master) drives <span style="background:#fcd34d"></span>BME280 (slave) drives</p>
+<div class="card" id="wrap"><svg id="wave" style="color:var(--fg)"></svg></div>
+<div class="card" id="stretch"></div>
+</div>
+<div class="card" id="viewF" style="display:none">
+<p class="mut" style="margin:0 0 4px">Driver finite state machine. <b style="color:#dc2626">Red</b> = transition taken in this step, <b style="color:#2563eb">blue</b> = already taken, yellow node = current state. Click a node or an edge to jump to the first step that uses it.</p>
+<svg id="fsm" viewBox="0 0 1100 675"></svg>
+<p id="fsmMsg" class="mut" style="min-height:1.3em;margin:2px 0 0"></p>
+</div>
+<div class="card lane"><div class="node" id="nM">STM32<br><small>I2C1</small></div><div class="wire"><div class="packet" id="pk"></div></div><div class="node" id="nS">BME280<br><small>0x76</small></div></div>
+<div class="live" id="live"></div>
+<div class="card" id="note"></div>
+<div id="strip"></div>
+<div class="ctl"><button id="prev">← Back</button><button id="play">▶ Play all</button><button id="next">Next →</button><select id="spd"><option value="2">0.5×</option><option value="1" selected>1×</option><option value="0.5">2×</option></select></div>
+
+<div class="card" id="detail">
+  <b id="dTitle" style="font-size:15px"></b>
+  <div id="bits"></div>
+  <div id="flds" style="display:flex;gap:4px;margin-bottom:6px"></div>
+  <div class="row"><b>Who drives</b><span id="dWho"></span></div>
+  <div class="row"><b>On the bus</b><span id="dBus"></span></div>
+  <div class="row"><b>Where in code</b><span id="dWhere" class="mono"></span></div>
+  <div class="row"><b>How</b><span id="dCode"></span></div>
+  <div class="row"><b>Why</b><span id="dWhy"></span></div>
+  <div class="row"><b>Byte path</b><span id="path" class="st"></span></div>
+  <div class="row"><b>Registers</b><span id="regs"></span></div>
+  <div class="row"><b>Next</b><span id="dNext"></span></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const hx=b=>parseInt(b,16).toString(2).padStart(8,"0");
+const C=(b,t,bus,fl,code,y,st,x)=>({b,t,d:"M",bus,fl,code,y,st,...x});
+const B=(d,b,t,bus,fl,code,y,st,x)=>({b,t,d,bits:hx(b),bus,fl,code,y,st,...x});
+const A=(d,v,t,bus,fl,code,y,st,x)=>({b:v?"NACK":"ACK",t,d,ack:v,bus,fl,code,y,st,...x});
+const T={start:"A transaction begins with START. Only START and STOP change SDA while SCL is high, so a slave can't mistake them for data.",
+ addr:"The first 7 bits are the device address, the 8th says write (0) or read (1). Every slave compares it with its own address.",
+ ack:"The slave pulls SDA low on the 9th clock. No ACK sets AF and triggers the error interrupt. ADDR holds SCL low until the ISR reads SR1 and SR2 (clock stretching)."};
+const AF=[[7,"address 0x76"],[1,"R/W = 0 (write)"]];
+
+const W=[
+C("START","START condition","SDA falls while SCL is high.","","<code>I2C1_Write_IT()</code>: checks the driver is idle, waits for the previous STOP to clear, clears POS, stores dev/reg/buffer/count, <code>state = SEND_ADDR</code>, sets <code>CR1.START</code>. Returns at once.",T.start,"SEND_ADDR",{cnt:1}),
+B("M","0xEC","Device address + W","0x76 &lt;&lt; 1 = 1110110<b>0</b>: last bit 0 = write.","SB","<code>DR = dev &lt;&lt; 1</code>; <code>state = SEND_REG</code>.",T.addr,"SEND_REG",{f:AF,cnt:1}),
+A("S",0,"ACK from sensor","BME280 holds SDA low on the 9th clock.","ADDR","clear the flag (read SR1, SR2), <code>DR = reg</code> (0xF4); write → <code>state = SEND_DATA</code>, <code>ITBUFEN = ON</code>.",T.ack,"SEND_DATA",{stretch:1,cnt:1}),
+B("M","0xF4","Register address","Register ctrl_meas, MSB first.","","The hardware shifts the byte out of DR.","Before the data, the slave must know which internal register to write: the first byte after the address is the register number.","SEND_DATA",{cnt:1,ib:1}),
+A("S",0,"ACK from sensor","Sensor acknowledges the register address.","TXE","<code>DR = *tx_buffer</code> (0x27), <code>tx_count → 0</code>, <code>ITBUFEN = OFF</code>, <code>state = STOP_WAIT</code>. No STOP yet: the byte is still on its way.","DR is empty (TXE), so the ISR loads the data. ITBUFEN is switched off so TXE stops firing.","STOP_WAIT",{cnt:1,ib:1}),
+B("M","0x27","Data byte","Value written to 0xF4.","","The hardware shifts the byte out.","Goes to ctrl_meas: 001 = temperature ×1, 001 = pressure ×1, 11 = normal mode (continuous measurements).","STOP_WAIT",{f:[[3,"osrs_t ×1"],[3,"osrs_p ×1"],[2,"mode: normal"]],cnt:0}),
+A("S",0,"ACK from sensor","Sensor acknowledges the data.","","Nothing for the ISR; waiting for BTF.","STOP must wait for BTF, otherwise it could cut the last byte short.","STOP_WAIT",{cnt:0}),
+C("STOP","STOP condition","SDA rises while SCL is high. Bus is free.","BTF","<code>CR1.STOP</code>, <code>state = IDLE</code>, <code>data_sent = 1</code>.","BTF is set once the last byte has left the shift register; only then does the ISR request STOP and signal main().","IDLE",{w:"state STOP_WAIT",stretch:"pre",cnt:0,done:1})];
+
+function readN(N){
+ const reg=N==1?"0xD0":"0xF7",D=["0x55","0x30","0x0F","0xA1","0x7C"],c={cnt:N};
+ const ad=N==1?["<code>rx_count == 1</code>: <code>ACK = 0</code>, clear the flag, <code>CR1.STOP</code>, <code>ITBUFEN = ON</code>.","With one byte, NACK and STOP must be set before it arrives, otherwise the hardware ACKs and the slave sends a second byte. SCL is held low, so there is time."]
+  :N==2?["<code>rx_count == 2</code>: <code>ACK = 0</code>, <code>POS = 1</code>, clear the flag (SR1, SR2). <code>ITBUFEN</code> stays OFF: wait for BTF.","With POS = 1 the ACK bit applies to the byte in the shift register, not to the one in DR: byte 1 is ACKed by the hardware and byte 2 is NACKed. SCL is held low, so the ISR has time to set this up before the clock runs (RM0390)."]
+  :N==3?["<code>rx_count == 3</code>: <code>ACK = 1</code>, clear the flag. <code>ITBUFEN</code> stays OFF: wait for BTF.","ITBUFEN stays off: we wait until two bytes are in (BTF), the only way to set NACK in time."]
+  :["<code>rx_count &gt; 3</code>: <code>ACK = 1</code>, clear the flag, <code>ITBUFEN = ON</code>.","While more than 3 bytes remain, one RXNE interrupt per byte is fine."];
+ const S=[
+ C("START","START condition","SDA falls while SCL is high.","","<code>I2C1_Read_IT()</code>: idle check, waits for the previous STOP to clear, clears POS, <code>is_read_operation = 1</code>, <code>rx_count = "+N+"</code>, <code>state = SEND_ADDR</code>, <code>CR1.START</code>.",T.start,"SEND_ADDR",c),
+ B("M","0xEC","Device address + W","0x76 &lt;&lt; 1 = 1110110<b>0</b>: write first, to point at a register.","SB","<code>DR = dev &lt;&lt; 1</code>; <code>state = SEND_REG</code>.","Reading takes two phases: first write the register number (so the slave knows where to read from), then read.","SEND_REG",{...c,f:AF}),
+ A("S",0,"ACK from sensor","BME280 holds SDA low on the 9th clock.","ADDR","clear the flag (SR1, SR2), <code>DR = reg</code>; read → <code>state = RESTART</code>, ITBUFEN stays OFF.",T.ack,"RESTART",{...c,stretch:1}),
+ B("M",reg,"Register address",N==1?"chip_id register.":"press_msb, start of the data block.","","The hardware shifts the byte out of DR.",N==1?"0xD0 is chip_id: BME280 always returns 0x60, a handy check that communication works.":"0xF7 (press_msb) starts the data block; every next byte is the next register (auto-increment).","RESTART",c),
+ A("S",0,"ACK from sensor","Sensor remembers which register to read.","BTF","dummy read of DR clears BTF, <code>CR1.START</code> (Repeated START), <code>state = SEND_RADDR</code>. No STOP: the bus stays ours.","Wait for BTF: the byte must be fully out before we change direction.","SEND_RADDR",{...c,w:"state RESTART",stretch:1}),
+ C("rSTART","Repeated START","A second START without a STOP before it.","SB","<code>DR = dev &lt;&lt; 1 | 1</code>; <code>state = READ_DATA</code>.","Repeated START instead of STOP + START: the bus stays busy, so no other master can slip in between the phases.","READ_DATA",c),
+ B("M","0xED","Device address + R","Last bit 1 = read: from now on the slave transmits.","","The hardware shifts the address out.","Now R = 1: the slave starts sending the register it was pointed to.","READ_DATA",{...c,f:[[7,"address 0x76"],[1,"R/W = 1 (read)"]]}),
+ A("S",0,"ACK from sensor","Sensor acknowledges the read address.","ADDR",ad[0],ad[1],"READ_DATA",{...c,stretch:1})];
+ let cnt=N;
+ for(let k=1;k<=N;k++){
+  const v=N==1?"0x60":D[k-1],last=k==N,rx=N==1||k<=N-3,ib=(N==1||(N>=4&&k<=N-3))?1:0;
+  const dr0=(N>=2&&k>=2&&k>=N-1)?D[k-2]:"empty";
+  S.push(B("S",v,"Byte "+k+" from sensor","BME280 drives SDA, the STM32 only samples it.","",
+   rx?"The shift register fills, then the byte moves to DR and RXNE fires.":(k==N-2||(N==2&&k==1))?"The byte moves to DR and waits there (ITBUFEN is OFF, so no RXNE interrupt).":"Byte "+k+" enters the shift register while byte "+(k-1)+" waits in DR: both buffers full → BTF.",
+   rx?"While more than 3 bytes remain, a plain RXNE interrupt per byte is enough.":(k==N-2||(N==2&&k==1))?"With ITBUFEN off nothing wakes the CPU: the byte just waits in DR.":"A second byte arrives while the first is still unread: this is the double buffering.","READ_DATA",{cnt,ib,dr:dr0,sh:v}));
+  const bus=last?"Master leaves SDA high: NACK = last byte.":"Master pulls SDA low: ACK, send the next one.",o={cnt,ib};
+  if(N==1) S.push(A("M",1,"NACK from master",bus,"RXNE","<code>*rx_buffer = DR</code>, <code>rx_count → 0</code>, <code>ITBUFEN = OFF</code>, <code>state = IDLE</code>, <code>data_ready = 1</code>. NACK and STOP were set earlier, in the ADDR branch.","NACK means “that was the last byte”. STOP was already requested before the byte arrived.","IDLE",{...o,dr:v,sh:"empty",done:1}));
+  else if(rx){const n=cnt--;S.push(A("M",0,"ACK from master",bus,"RXNE","<code>*rx_buffer++ = DR</code>, <code>rx_count "+n+" → "+cnt+"</code>"+(cnt==3?", <code>ITBUFEN = OFF</code>: only BTF from now on.":"."),cnt==3?"Only 3 bytes left: from here the last bytes must be handled with the clock stopped (BTF), so RXNE is switched off.":"The byte is already in DR, so the ISR just copies it out.","READ_DATA",{...o,dr:v,sh:"empty"}))}
+  else if(N==2&&k==1) S.push(A("M",0,"ACK from master",bus,"","No ISR: with POS set, the hardware ACKs byte 1 by itself.","POS = 1 changes what the ACK bit applies to: byte 1 is ACKed automatically and only the byte in the shift register (byte 2) gets the NACK.","READ_DATA",{...o,dr:v,sh:"empty"}));
+  else if(k==N-2) S.push(A("M",0,"ACK from master",bus,"","Nothing to do in the ISR.","The master ACKs: “send the next one”.","READ_DATA",{...o,dr:v,sh:"empty"}));
+  else if(k==N-1){cnt=2;S.push(A("M",0,"ACK from master",bus,"BTF","<code>ACK = 0</code> (NACK for the last byte), read DR (byte "+(k-1)+"), <code>rx_count 3 → 2</code>. SCL is released.","DR and the shift register are both full, so SCL is held low. This is the only moment to set NACK for the last byte in time.","READ_DATA",{...o,w:"state READ_DATA, rx_count == 3",dr:D[k-2],sh:v,stretch:1,cnt:3}))}
+  else {S.push(A("M",1,"NACK from master",bus,"BTF","<code>CR1.STOP</code>, read DR twice (byte "+(k-1)+", then byte "+k+" from the shift register), <code>rx_count 2 → 0</code>, <code>state = IDLE</code>, <code>data_ready = 1</code>.","Both buffers are full and the clock is stopped, so STOP can be requested and both bytes read back-to-back: the first read moves the shift register into DR.","IDLE",{...o,w:"state READ_DATA, rx_count == 2",dr:D[k-2],sh:v,stretch:1,cnt:2,done:1}));cnt=0}
+ }
+ S.push(C("STOP","STOP condition","SDA rises while SCL is high. Bus is free.","","main() sees <code>data_ready = 1</code> and can use the data.","STOP was requested before the last byte arrived, so the hardware generates it right after that byte.","IDLE",{cnt:0,done:1}));
+ return S;
+}
+const TABS={tW:W,tR1:readN(1),tR2:readN(2),tR3:readN(3),tR5:readN(5)};
+const SMW=["IDLE","SEND_ADDR","SEND_REG","SEND_DATA","STOP_WAIT","IDLE"],SMR=["IDLE","SEND_ADDR","SEND_REG","RESTART","SEND_RADDR","READ_DATA","IDLE"];
+const FL=["SB","ADDR","BTF","RXNE","TXE"];
+
+const U=20,X0=44,SG=84;
+let cur=W,id0="tW",i=0,prog=0,playing=false,last=0,scale=1;
+const lay=()=>{let x=X0;return cur.map(s=>{const n=s.bits?8:1,pre=s.stretch=="pre"?SG:0,post=s.stretch==1?SG:0,o={x0:x,bx:x+pre,n,pre,post};o.gx=o.bx+n*U;x=o.gx+post;o.x1=x;return o})};
+function build(){
+ const L=lay(),end=L[L.length-1].x1+30;
+ const sc={v:1,p:[[X0-20,1]]},sd={v:1,p:[[X0-20,1]]};
+ const set=(o,x,v)=>{if(o.v!==v){o.p.push([x,o.v],[x,v]);o.v=v}};
+ const T_=(x,y,t,c)=>`<text x="${x}" y="${y}" font-size="10" text-anchor="middle" fill="${c||"currentColor"}">${t}</text>`;
+ let bands="",txt="";
+ const gap=(a,b)=>{txt+=`<line x1="${a}" x2="${b}" y1="55" y2="55" stroke="#ea580c" stroke-width="3" stroke-dasharray="5 3"/>`+T_((a+b)/2,36,"SCL stretched","#ea580c")+T_((a+b)/2,47,"by STM32","#ea580c")};
+ cur.forEach((s,k)=>{
+  const l=L[k],c=s.d=="M"?"#2563eb":"#d97706",x0=l.bx;
+  bands+=`<rect class="band" data-k="${k}" x="${l.x0}" y="16" width="${l.x1-l.x0}" height="124" fill="${c}" fill-opacity=".12" stroke="${c}" stroke-opacity="0"/>`;
+  txt+=T_((l.bx+l.gx)/2,11,s.b);
+  if(l.pre)gap(l.x0+4,l.bx-4);
+  if(s.bits)[...s.bits].forEach((b,j)=>{const x=x0+j*U;set(sc,x,0);set(sd,x,+b);set(sc,x+U*.25,1);set(sc,x+U*.75,0);txt+=T_(x+U/2,152,b)});
+  else if(s.ack!==undefined){set(sc,x0,0);set(sd,x0,s.ack);set(sc,x0+U*.25,1);set(sc,x0+U*.75,0);txt+=T_(x0+U/2,152,s.ack)}
+  else if(s.b=="START")set(sd,x0+U*.5,0);
+  else if(s.b=="rSTART"){set(sd,x0+U*.1,1);set(sc,x0+U*.3,1);set(sd,x0+U*.6,0)}
+  else{set(sd,x0,0);set(sc,x0+U*.3,1);set(sd,x0+U*.6,1)}
+  if(l.post)gap(l.gx+4,l.x1-4);
+ });
+ sc.p.push([end-20,sc.v]);sd.p.push([end-20,sd.v]);
+ const path=(o,hi,lo)=>"M"+o.p.map(([x,v])=>x+","+(v?hi:lo)).join(" L");
+ const w=Math.max(640,end*.9);scale=w/end;
+ $("wave").style.width=w+"px";$("wave").setAttribute("viewBox",`0 0 ${end} 158`);
+ $("wave").innerHTML=bands+`<text x="2" y="44" font-size="12" fill="currentColor">SCL</text><text x="2" y="114" font-size="12" fill="currentColor">SDA</text><path d="${path(sc,25,55)}" fill="none" stroke="var(--mut)" stroke-width="2"/><path d="${path(sd,95,125)}" fill="none" stroke="currentColor" stroke-width="2"/>`+txt+`<line id="curs" y1="16" y2="140" stroke="#dc2626" stroke-width="2"/>`;
+ document.querySelectorAll(".band").forEach(r=>r.onclick=()=>pick(+r.dataset.k));
+ $("strip").innerHTML=cur.map((s,k)=>`<div class="cell ${s.d}" data-k="${k}">${s.b}<small>${s.d=="M"?"master":"slave"}</small></div>`).join("");
+ document.querySelectorAll(".cell").forEach(c=>c.onclick=()=>pick(+c.dataset.k));
+ $("sm").innerHTML=(cur===W?SMW:SMR).map((n,k,a)=>`<span class="state" data-s="${n}">${n}</span>${k<a.length-1?"→":""}`).join("");
+ i=0;prog=0;show();
+}
+function pick(k){i=k;prog=0;show()}
+const rg=(n,on)=>`<span class="rg ${on?"on":""}">${n}</span>`;
+const full=v=>v&&v!="empty";
+function show(){
+ const s=cur[i],L=lay()[i],isW=cur===W;
+ document.querySelectorAll(".cell").forEach((c,k)=>c.classList.toggle("sel",k==i));
+ document.querySelectorAll(".band").forEach((r,k)=>{r.setAttribute("fill-opacity",k==i?.4:.12);r.setAttribute("stroke-opacity",k==i?1:0)});
+ const wr=$("wrap");wr.scrollLeft=Math.max(0,(L.x0+L.x1)/2*scale-wr.clientWidth/2);
+ $("dTitle").textContent=`Step ${i+1}/${cur.length}: ${s.t}`;
+ $("bits").innerHTML=s.bits?[...s.bits].map(b=>`<div class="bit ${s.d}">${b}</div>`).join(""):s.ack!==undefined?`<div class="bit n ${s.d}">${s.ack}</div><span class="mut" style="align-self:center">${s.ack?"SDA = 1 → NACK":"SDA = 0 → ACK"}</span>`:`<span class="mut">bus condition, no data byte</span>`;
+ $("flds").innerHTML=(s.f||[]).map(([n,l])=>`<div style="width:${n*34+(n-1)*4}px;border-top:2px solid var(--fg);text-align:center;font-size:11px;padding-top:2px">${l}</div>`).join("");
+ $("dWho").textContent=s.ack!==undefined?(s.d=="S"?"BME280 pulls SDA low = ACK":s.ack?"STM32 releases SDA (pull-up gives 1) = NACK":"STM32 pulls SDA low = ACK"):s.bits?(s.d=="M"?"STM32 puts the bits on SDA":"BME280 puts the bits on SDA, the STM32 only samples them"):"STM32 generates the "+s.b+" condition";
+ $("dBus").innerHTML=s.bus;
+ $("dWhere").textContent=s.fl?`I2C1_EV_IRQHandler() → ${s.fl} branch`+(s.w?` (${s.w})`:""):(i==0?(isW?"I2C1_Write_IT":"I2C1_Read_IT")+"() (main context)":"I2C1 hardware, no CPU involved");
+ $("dCode").innerHTML=s.code;$("dWhy").textContent=s.y;
+ $("dNext").textContent=i<cur.length-1?"→ "+cur[i+1].t:"end of transaction";
+ document.querySelectorAll(".state").forEach(e=>e.classList.toggle("on",e.dataset.s==s.st));
+ $("nM").classList.toggle("on",s.d=="M");$("nS").classList.toggle("on",s.d=="S");
+ const pk=$("pk");pk.textContent=s.b;pk.style.background=s.d=="M"?"#bfdbfe":"#fcd34d";
+ let a="—",pp="0",done=0;
+ cur.slice(0,i+1).forEach(x=>{const m=x.code.match(/ACK = (\d)/);if(m)a=m[1];const mp=x.code.match(/POS = (\d)/);if(mp)pp=mp[1];if(x.done)done=1});
+ const dr=s.dr||"empty",sh=s.sh||(s.bits?s.b:"empty"),ib=s.ib?"ON":"OFF";
+ const chip=(l,v,c)=>`<div class="chip ${c||""}">${l}<b>${v}</b></div>`;
+ $("live").innerHTML=chip("CPU",s.fl?"ISR":"main()",s.fl?"on":"")+chip("SR1 flag",s.fl||"—",s.fl?"on":"")+chip("DR",dr,full(dr)?"on":"")+chip("Shift register",sh,full(sh)?"on":"")+chip(isW?"tx_count":"rx_count",s.cnt===undefined?"—":s.cnt,"")+chip("CR2: ITBUFEN",ib,ib)+chip("state",s.st,"on")+chip(isW?"data_sent":"data_ready",done,done?"on":"");
+ const sn=$("stretch");sn.style.display=s.stretch?"block":"none";
+ sn.textContent="SCL stretched by STM32 — ISR is handling flags: "+(s.fl=="ADDR"?"ADDR is set, SCL stays low until the ISR has set ACK/POS and read SR1 then SR2.":"BTF is set, SCL stays low until the ISR has set NACK/STOP and read DR.");
+ const nt=$("note");nt.style.display=s.fl=="BTF"&&full(s.dr)&&full(s.sh)?"block":"none";
+ nt.innerHTML="<b>Double buffering:</b> BTF = 1 means DR holds an unread byte and the shift register already holds the next one, so SCL is held low. Reading DR moves the shift register into DR, which is why the ISR can read DR twice in a row and get two different bytes.";
+ const cr=s.code,box=t=>`<span class="state">${t}</span>`;
+ $("regs").innerHTML="SR1: "+FL.map(n=>rg(n,n==s.fl)).join("")+" &nbsp; CR1: "+rg("START",/CR1\.START/.test(cr))+rg("STOP",/CR1\.STOP/.test(cr))+rg("ACK = "+a,/ACK = \d/.test(cr))+rg("POS = "+pp,/POS = \d/.test(cr));
+ $("path").innerHTML=!s.bits?'<span class="mut">no byte, the hardware generates the signal</span>':(s.d=="M"?["RAM (ISR)","DR","shift register","SDA → BME280"]:["BME280","SDA","shift register","DR","RAM (ISR)"]).map(box).join(" → ");
+ fsmUpdate();tick(prog);
+}
+function pipe(p){
+ const s=cur[i];if(!s.bits)return;
+ const lit=s.d=="M"?(p<.1?[0]:p<.2?[1]:[2,3]):(p<.9?[0,1,2]:p<.95?[3]:[4]);
+ document.querySelectorAll("#path .state").forEach((e,k)=>e.classList.toggle("on",lit.includes(k)));
+}
+function tick(p){
+ const s=cur[i],L=lay()[i],x=L.bx+p*(L.gx-L.bx);
+ const c=$("curs");c.setAttribute("x1",x);c.setAttribute("x2",x);
+ $("pk").style.left=(s.d=="M"?p:1-p)*100+"%";
+ pipe(p);
+ if(s.bits){const n=Math.floor(p*8);document.querySelectorAll("#bits .bit").forEach((b,k)=>b.style.opacity=k<=n?1:.3)}
+}
+function frame(ts){
+ const dt=Math.min(ts-last,100);last=ts;
+ prog+=dt/(Math.max(1000,cur[i].bits?2600:1000)*(+$("spd").value));
+ if(prog>=1){prog=0;if(playing){if(i<cur.length-1){i++;show()}else{playing=false;$("play").textContent="▶ Play all"}}}
+ tick(prog);requestAnimationFrame(frame);
+}
+$("next").onclick=()=>{if(i<cur.length-1)pick(i+1)};
+$("prev").onclick=()=>{if(i>0)pick(i-1)};
+$("play").onclick=()=>{playing=!playing;if(playing&&i==cur.length-1){i=0;show()}prog=0;$("play").textContent=playing?"⏸ Pause":"▶ Play all"};
+Object.keys(TABS).forEach(id=>$(id).onclick=()=>{cur=TABS[id];playing=false;$("play").textContent="▶ Play all";Object.keys(TABS).forEach(k=>$(k).classList.toggle("on",k==id));build()});
+const FN={IDLE:[75,300],SEND_ADDR:[335,300],SEND_REG:[595,300],SEND_DATA:[720,130],STOP_WAIT:[975,130],RESTART:[720,470],SEND_RADDR:[975,470],READ_DATA:[720,560],ER:[335,480]};
+const FE={
+"IDLE>SEND_ADDR":["M131,300 L279,300",205,262,"middle",["I2C1_Write_IT /","I2C1_Read_IT:","CR1.START"]],
+"SEND_ADDR>SEND_REG":["M391,300 L539,300",465,274,"middle",["SB=1:","DR = addr&lt;&lt;1 | 0"]],
+"SEND_REG>SEND_DATA":["M625,283 L692,147",680,198,"start",["ADDR=1 [Write]:","DR = reg,","ITBUFEN=1"]],
+"SEND_DATA>SEND_DATA":["M690,113 C670,60 770,60 750,113",720,44,"middle",["TXE=1 / BTF=1 while tx_count &gt; 0:","DR = *tx_buf++"]],
+"SEND_DATA>STOP_WAIT":["M776,130 L919,130",847,148,"middle",["tx_count == 0:","ITBUFEN=0"]],
+"STOP_WAIT>IDLE":["M975,113 L975,22 L75,22 L75,281",520,16,"middle",["BTF=1: CR1.STOP, data_sent=1"]],
+"SEND_REG>RESTART":["M625,317 L692,453",680,372,"start",["ADDR=1 [Read]:","DR = reg,","ITBUFEN=0"]],
+"RESTART>SEND_RADDR":["M776,470 L919,470",847,436,"middle",["BTF=1:","(void)DR dummy read,","CR1.START"]],
+"SEND_RADDR>READ_DATA":["M950,487 L776,556",880,552,"start",["SB=1:","DR = addr&lt;&lt;1 | 1"]],
+"READ_DATA>READ_DATA":["M690,577 C670,628 770,628 750,577",720,636,"middle",["ADDR=1: config ACK/POS/ITBUFEN","RxNE=1 (rx_count &gt; 3): read DR","BTF=1 (rx_count == 3): ACK=0, read DR"]],
+"READ_DATA>IDLE":["M664,552 L75,552 L75,319",370,568,"middle",["RxNE=1 (N=1) or BTF=1 (rx_count == 2):","CR1.STOP, double DR read, data_ready=1"]],
+"ER>IDLE":["M235,476 L110,319",335,518,"middle",["ER_IRQHandler: CR1.STOP,","ITBUFEN=0, i2c_error=1"]]};
+const fsmMsg=t=>$("fsmMsg").textContent=t;
+function ek(k){const s=cur[k];if(!(s.fl||k==0))return null;const key=(k?cur[k-1].st:"IDLE")+">"+s.st;return FE[key]?key:null}
+function buildFsm(){
+ const mk=id=>`<marker id="${id}" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="8" markerHeight="6" orient="auto"><polygon points="0,0 8,3 0,6"/></marker>`;
+ let h="<defs>"+mk("ar")+mk("arB")+mk("arR")+"</defs>";
+ for(const k in FE){const [d,x,y,an,ls]=FE[k];
+  h+=`<g class="fe${k=="ER>IDLE"?" er":""}" data-k="${k}"><path d="${d}"/><path d="${d}" style="stroke:transparent;stroke-width:14;marker-end:none"/><text text-anchor="${an}">${ls.map((t,j)=>`<tspan x="${x}" y="${y+j*12}">${t}</tspan>`).join("")}</text></g>`}
+ for(const n in FN){const [x,y]=FN[n],er=n=="ER",w=er?200:112,hh=er?40:34;
+  h+=`<g class="fn" data-s="${n}"><rect x="${x-w/2}" y="${y-hh/2}" width="${w}" height="${hh}" rx="8"/>`+(er?`<text x="${x}" y="${y-3}" text-anchor="middle">ER_IRQHandler</text><text x="${x}" y="${y+12}" text-anchor="middle" style="font-weight:400;font-size:10.5px">BERR / AF / ARLO / OVR</text>`:`<text x="${x}" y="${y+4}" text-anchor="middle">${n}</text>`)+"</g>"}
+ $("fsm").innerHTML=h;
+ document.querySelectorAll("#fsm .fn").forEach(g=>g.onclick=()=>{const n=g.dataset.s,k=n=="IDLE"?cur.length-1:cur.findIndex(s=>s.st==n);
+  fsmMsg(k>=0?"":n=="ER"?"Error path: any BERR/AF/ARLO/OVR ends in ER_IRQHandler → STOP, IDLE, i2c_error = 1 (not exercised in these scenarios).":"State "+n+" is not visited in this scenario.");if(k>=0)pick(k)});
+ document.querySelectorAll("#fsm .fe").forEach(g=>g.onclick=()=>{const k=cur.findIndex((_,j)=>ek(j)==g.dataset.k);
+  fsmMsg(k>=0?"":"This transition is not used in the selected scenario.");if(k>=0)pick(k)});
+}
+function fsmUpdate(){
+ const act=ek(i),vis=new Set();for(let k=0;k<=i;k++){const q=ek(k);if(q)vis.add(q)}
+ document.querySelectorAll("#fsm .fe").forEach(e=>{e.classList.toggle("on",e.dataset.k==act);e.classList.toggle("vis",vis.has(e.dataset.k))});
+ document.querySelectorAll("#fsm .fn").forEach(n=>n.classList.toggle("on",n.dataset.s==cur[i].st));
+}
+$("vW").onclick=$("vF").onclick=function(){const f=this.id=="vF";$("viewW").style.display=f?"none":"";$("viewF").style.display=f?"":"none";$("vW").classList.toggle("on",!f);$("vF").classList.toggle("on",f);fsmMsg("");fsmUpdate()};
+buildFsm();build();requestAnimationFrame(frame);
+</script>
+</body>
+</html>
