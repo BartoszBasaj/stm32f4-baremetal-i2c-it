@@ -2,7 +2,7 @@
 
 Non-blocking (interrupt-driven) I2C1 master driver written from scratch in C using direct CMSIS register access for the **STM32F446RE** (ARM Cortex-M4), with zero HAL/LL dependencies.
 
-The project is structured into three layers: a generic hardware I2C driver (`driver/`), a modular **Bosch BME280** sensor driver (`device/`) with 32-bit fixed-point compensation, and an application layer (`app/`) featuring **Independent Watchdog (IWDG)** fault recovery and real-time SWV ITM logging. It also includes a zero-dependency interactive HTML/SVG waveform and FSM simulator (`visualizer.html`).
+The project is structured into three layers: a generic hardware I2C driver (`driver/`), a modular **Bosch BME280** sensor driver (`device/`) with 32-bit fixed-point compensation, and an application layer (`app/`) featuring **Independent Watchdog (IWDG)** fault recovery and real-time SWV ITM logging. It also includes a zero-dependency interactive HTML/SVG waveform and FSM simulator (`index.html`).
 
 ![Demo GIF](docs/gif.gif)
 
@@ -78,7 +78,7 @@ The STM32F4 I2C peripheral requires strict hardware event sequencing during mult
 │   └── main.c            # Application Layer: Main loop, IWDG watchdog & SWV logging
 ├── docs/
 │   └── gif.gif           # Live debugging & fault recovery demo
-├── visualizer.html       # Interactive step-by-step I2C waveform & FSM simulator
+├── index.html            # Interactive step-by-step I2C waveform & FSM simulator
 └── README.md
 ```
 
